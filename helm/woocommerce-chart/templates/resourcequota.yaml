@@ -1,0 +1,30 @@
+# ─── ResourceQuota ────────────────────────────────────────────────
+#
+# Limits the total resources a single store can consume.
+#
+# WHY?
+# - Prevents a single store from starving the cluster
+# - Important for multi-tenant isolation
+# - Blast radius control: one bad store can't affect others
+#
+# INTERVIEW DEFENSE:
+# "Each store has a ResourceQuota in its namespace. Even if a store
+#  is compromised, it can't consume more than its allocated share."
+
+{{- if .Values.resourceQuota.enabled }}
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-quota
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+spec:
+  hard:
+    requests.cpu: {{ .Values.resourceQuota.limits.cpu | quote }}
+    requests.memory: {{ .Values.resourceQuota.limits.memory | quote }}
+    limits.cpu: {{ .Values.resourceQuota.limits.cpu | quote }}
+    limits.memory: {{ .Values.resourceQuota.limits.memory | quote }}
+    pods: {{ .Values.resourceQuota.limits.pods | quote }}
+    persistentvolumeclaims: {{ .Values.resourceQuota.limits.persistentvolumeclaims | quote }}
+    requests.storage: {{ .Values.resourceQuota.limits.storage | quote }}
+{{- end }}

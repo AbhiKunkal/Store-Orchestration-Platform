@@ -1,0 +1,80 @@
+# ─── Backend API Deployment ───────────────────────────────────────
+#
+# The API server runs Express + SQLite.
+# It needs: helm CLI, kubectl, and the woocommerce chart files
+# to be able to provision stores.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: store-api
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: api
+spec:
+  replicas: {{ .Values.api.replicas }}
+  selector:
+    matchLabels:
+      {{- include "platform.api.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "platform.api.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: store-api
+      
+      containers:
+        - name: api
+          image: {{ .Values.api.image }}
+          imagePullPolicy: {{ .Values.api.imagePullPolicy }}
+          ports:
+            - containerPort: {{ .Values.api.port }}
+              name: http
+              protocol: TCP
+          
+          env:
+            - name: PORT
+              value: {{ .Values.api.port | quote }}
+            - name: NODE_ENV
+              value: "production"
+            - name: DB_PATH
+              value: "/data/store-platform.db"
+            - name: BASE_DOMAIN
+              value: {{ .Values.domain | quote }}
+            - name: MAX_STORES
+              value: {{ .Values.api.env.maxStores | quote }}
+            - name: PROVISION_TIMEOUT_MS
+              value: {{ .Values.api.env.provisionTimeoutMs | quote }}
+            - name: HELM_CHART_PATH
+              value: {{ .Values.api.env.helmChartPath | quote }}
+
+          resources:
+            requests:
+              cpu: {{ .Values.api.resources.requests.cpu }}
+              memory: {{ .Values.api.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.api.resources.limits.cpu }}
+              memory: {{ .Values.api.resources.limits.memory }}
+          
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          
+          volumeMounts:
+            - name: api-data
+              mountPath: /data
+      
+      volumes:
+        - name: api-data
+          persistentVolumeClaim:
+            claimName: store-api-data

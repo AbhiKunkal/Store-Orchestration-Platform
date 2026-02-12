@@ -1,0 +1,69 @@
+# ─── Platform Chart: Default Values ──────────────────────────────
+#
+# This chart deploys the platform itself:
+# - Backend API (Express)
+# - Dashboard (React served by nginx)
+# - RBAC for the API's service account
+
+# Base domain for all services
+domain: 127.0.0.1.nip.io
+
+# ─── Backend API ─────────────────────────────────────────────────
+api:
+  image: store-api:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  port: 3001
+  
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  
+  # SQLite storage
+  storage:
+    size: 1Gi
+    className: ""
+
+  env:
+    maxStores: "10"
+    provisionTimeoutMs: "600000"
+    helmChartPath: "/app/charts/woocommerce-chart"
+
+# ─── Dashboard ───────────────────────────────────────────────────
+dashboard:
+  image: store-dashboard:latest
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+# ─── Ingress ─────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  className: nginx
+  tls: false
+  annotations: {}
+
+# ─── Autoscaling (HPA) ──────────────────────────────────────────
+# Disabled by default for local development (kind = single node).
+# Enable in values-prod.yaml for production.
+autoscaling:
+  enabled: false
+  api:
+    minReplicas: 1
+    maxReplicas: 5
+    targetCPU: 70
+  dashboard:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPU: 80

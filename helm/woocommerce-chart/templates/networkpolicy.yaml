@@ -1,0 +1,103 @@
+# ─── Network Policy ───────────────────────────────────────────────
+#
+# DENY-BY-DEFAULT with explicit allows.
+#
+# WHY NetworkPolicy?
+# - Without it, any pod can talk to any other pod in the cluster
+# - Store A's MySQL should NOT be accessible from Store B
+# - Only WordPress needs to talk to MySQL
+# - Only Ingress controller needs to talk to WordPress
+#
+# This is a STRONG differentiator in interviews.
+# Most candidates never mention network isolation.
+
+{{- if .Values.networkPolicy.enabled }}
+
+# Rule 1: MySQL only accepts connections from WordPress in same namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-mysql-policy
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woocommerce.mysql.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow WordPress → MySQL on port 3306
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce.wordpress.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 3306
+          protocol: TCP
+  egress:
+    # Allow DNS resolution
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+
+---
+
+# Rule 2: WordPress accepts traffic from Ingress controller only
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-wordpress-policy
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "woocommerce.wordpress.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    # Allow Ingress Controller → WordPress on port 80
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+      ports:
+        - port: 80
+          protocol: TCP
+    # Allow init Job → WordPress on port 80 (health check)
+    - from:
+        - podSelector: {}
+      ports:
+        - port: 80
+          protocol: TCP
+  egress:
+    # Allow WordPress → MySQL
+    - to:
+        - podSelector:
+            matchLabels:
+              {{- include "woocommerce.mysql.selectorLabels" . | nindent 14 }}
+      ports:
+        - port: 3306
+          protocol: TCP
+    # Allow DNS
+    - to: []
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    # Allow outbound HTTP/HTTPS (needed for plugin downloads, updates)
+    - to: []
+      ports:
+        - port: 80
+          protocol: TCP
+        - port: 443
+          protocol: TCP
+
+{{- end }}

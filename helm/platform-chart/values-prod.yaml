@@ -1,0 +1,51 @@
+# ─── Production values override ───────────────────────────────────
+# For VPS / k3s deployment
+#
+# WHAT CHANGES:
+# - Domain: real domain instead of nip.io
+# - TLS: enabled via cert-manager
+# - Images: pulled from registry (not local build)
+# - Resources: adjusted for production workload
+# - Autoscaling: HPA enabled for API and Dashboard
+# - Max stores: increased to 50
+
+domain: myplatform.com  # Replace with your actual domain
+
+api:
+  image: your-registry/store-api:1.0.0  # Replace with your registry
+  imagePullPolicy: Always
+  replicas: 2  # Minimum 2 for HA
+  env:
+    maxStores: "50"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  storage:
+    size: 5Gi
+    className: local-path  # k3s default
+
+dashboard:
+  image: your-registry/store-dashboard:1.0.0
+  replicas: 2
+
+ingress:
+  className: nginx  # or traefik if using k3s default
+  tls: true
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+# Enable HPA in production
+autoscaling:
+  enabled: true
+  api:
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPU: 70
+  dashboard:
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPU: 80

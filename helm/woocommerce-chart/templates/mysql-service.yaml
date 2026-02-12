@@ -1,0 +1,28 @@
+# ─── MySQL Service ────────────────────────────────────────────────
+#
+# ClusterIP Service: only accessible INSIDE the cluster.
+# WordPress connects to MySQL using this service name as hostname.
+#
+# WHY ClusterIP (not NodePort/LoadBalancer)?
+# Databases should NEVER be exposed to the internet.
+# Only WordPress (same namespace) needs to reach MySQL.
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-mysql
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  # clusterIP: None makes this a "headless" service
+  # Required for StatefulSet — pods get stable DNS names
+  clusterIP: None
+  ports:
+    - port: 3306
+      targetPort: mysql
+      protocol: TCP
+      name: mysql
+  selector:
+    {{- include "woocommerce.mysql.selectorLabels" . | nindent 4 }}

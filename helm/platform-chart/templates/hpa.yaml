@@ -1,0 +1,59 @@
+# ─── HorizontalPodAutoscaler ─────────────────────────────────────
+#
+# Scales API and Dashboard pods based on CPU utilization.
+#
+# WHY?
+# - Dashboard = stateless nginx → scales freely
+# - API = mostly stateless → scales with PostgreSQL (prod) or behind load balancer
+# - Demonstrates "implemented, not just described" scaling
+#
+# INTERVIEW DEFENSE:
+# "HPA is conditional — disabled locally (single-node kind),
+#  enabled in production via values-prod.yaml."
+
+{{- if .Values.autoscaling.enabled }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: store-api-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: store-api
+  minReplicas: {{ .Values.autoscaling.api.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.api.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.api.targetCPU }}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: store-dashboard-hpa
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: store-dashboard
+  minReplicas: {{ .Values.autoscaling.dashboard.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.dashboard.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ .Values.autoscaling.dashboard.targetCPU }}
+{{- end }}

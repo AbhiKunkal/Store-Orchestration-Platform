@@ -1,0 +1,22 @@
+# ─── WordPress PVC ────────────────────────────────────────────────
+#
+# Persists the full WordPress installation (/var/www/html).
+# This includes wp-content (themes, plugins, uploads) AND core files.
+# WordPress writes to this directory during operation.
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-wordpress
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storefront
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.wordpress.storage.className }}
+  storageClassName: {{ .Values.wordpress.storage.className }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.wordpress.storage.size }}

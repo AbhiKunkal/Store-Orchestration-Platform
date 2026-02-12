@@ -1,0 +1,6 @@
+apiVersion: v2
+name: woocommerce-store
+description: A Helm chart for provisioning an isolated WooCommerce store
+type: application
+version: 1.0.0
+appVersion: "6.4"

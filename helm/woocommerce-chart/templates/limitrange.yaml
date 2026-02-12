@@ -1,0 +1,26 @@
+# ─── LimitRange ───────────────────────────────────────────────────
+#
+# Sets DEFAULT resource requests/limits for containers that don't specify them.
+#
+# WHY?
+# - Ensures every container has resource boundaries
+# - Prevents accidentally running containers with no limits
+# - Works hand-in-hand with ResourceQuota
+
+{{- if .Values.limitRange.enabled }}
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-limits
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+spec:
+  limits:
+    - type: Container
+      default:
+        cpu: {{ .Values.limitRange.default.cpu }}
+        memory: {{ .Values.limitRange.default.memory }}
+      defaultRequest:
+        cpu: {{ .Values.limitRange.defaultRequest.cpu }}
+        memory: {{ .Values.limitRange.defaultRequest.memory }}
+{{- end }}

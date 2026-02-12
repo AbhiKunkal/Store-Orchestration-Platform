@@ -1,0 +1,122 @@
+# ─── MySQL StatefulSet ────────────────────────────────────────────
+#
+# WHY StatefulSet instead of Deployment?
+# 1. Stable network identity: pod always gets same hostname
+# 2. Stable storage: PVC survives pod restarts
+# 3. Ordered startup: important for database initialization
+#
+# WHY single replica?
+# Running MySQL replicas requires replication setup which is
+# out of scope. Single replica + PVC gives us persistence.
+# In production: use a managed DB or MySQL operator.
+
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-mysql
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: database
+spec:
+  replicas: 1
+  serviceName: {{ include "woocommerce.fullname" . }}-mysql
+  selector:
+    matchLabels:
+      {{- include "woocommerce.mysql.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "woocommerce.mysql.selectorLabels" . | nindent 8 }}
+    spec:
+      # ── Security Context (pod-level) ──
+      securityContext:
+        fsGroup: 999  # mysql group
+
+      containers:
+        - name: mysql
+          image: {{ .Values.mysql.image }}
+          ports:
+            - containerPort: 3306
+              name: mysql
+              protocol: TCP
+          
+          # ── Environment from Secrets ──
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-root-password
+            - name: MYSQL_DATABASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-database
+            - name: MYSQL_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-user
+            - name: MYSQL_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-password
+          
+          # ── Resource Limits ──
+          # Requests: what K8s guarantees (scheduling)
+          # Limits: max the container can use (OOMKilled if exceeded)
+          resources:
+            requests:
+              cpu: {{ .Values.mysql.resources.requests.cpu }}
+              memory: {{ .Values.mysql.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.mysql.resources.limits.cpu }}
+              memory: {{ .Values.mysql.resources.limits.memory }}
+          
+          # ── Liveness Probe ──
+          # "Is the process alive?" → restarts container if not
+          livenessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ── Readiness Probe ──
+          # "Can it accept traffic?" → removes from Service if not
+          readinessProbe:
+            exec:
+              command:
+                - mysqladmin
+                - ping
+                - -h
+                - localhost
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          # ── Volume Mount ──
+          volumeMounts:
+            - name: mysql-data
+              mountPath: /var/lib/mysql
+
+  # ── Volume Claim Template ──
+  # StatefulSet creates a unique PVC per pod (not shared!)
+  volumeClaimTemplates:
+    - metadata:
+        name: mysql-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.mysql.storage.className }}
+        storageClassName: {{ .Values.mysql.storage.className }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.mysql.storage.size }}

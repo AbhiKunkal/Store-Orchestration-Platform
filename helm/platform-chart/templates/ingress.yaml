@@ -1,0 +1,48 @@
+# ─── Platform Ingress ─────────────────────────────────────────────
+#
+# Routes dashboard and API traffic from the outside world:
+#   dashboard.127.0.0.1.nip.io → dashboard service (port 80)
+#   api.127.0.0.1.nip.io       → API service (port 3001)
+
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: store-platform-ingress
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+  annotations:
+    {{- if .Values.ingress.annotations }}
+    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    - hosts:
+        - dashboard.{{ .Values.domain }}
+        - api.{{ .Values.domain }}
+      secretName: store-platform-tls
+  {{- end }}
+  rules:
+    - host: dashboard.{{ .Values.domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: store-dashboard
+                port:
+                  number: 80
+    - host: api.{{ .Values.domain }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: store-api
+                port:
+                  number: {{ .Values.api.port }}
+{{- end }}

@@ -1,0 +1,261 @@
+# ─── WordPress Init Job ───────────────────────────────────────────
+#
+# This Kubernetes Job runs ONCE after WordPress + MySQL are deployed.
+# It uses curl to:
+#   1. Trigger WordPress installation via wp-admin/install.php
+#   2. Install + activate WooCommerce via WP REST API
+#   3. Create sample products
+#   4. Configure payment gateway (COD for demo)
+#
+# WHY curl instead of WP-CLI?
+# - WP-CLI needs wp-config.php (generated at runtime by WordPress container)
+# - The CLI image can't access runtime-generated config files
+# - curl approach works with any WordPress deployment — more reliable
+#
+# IDEMPOTENCY:
+# WordPress install endpoint returns success even if already installed.
+# Product creation is safe to re-run (may create duplicates but won't break).
+
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-init
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: init
+spec:
+  backoffLimit: 3
+  activeDeadlineSeconds: 900  # 15 min max
+  template:
+    metadata:
+      labels:
+        {{- include "woocommerce.labels" . | nindent 8 }}
+        app.kubernetes.io/component: init
+    spec:
+      restartPolicy: OnFailure
+      
+      # Init container waits for WordPress to be fully reachable
+      initContainers:
+        - name: wait-for-wordpress
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for WordPress to be ready..."
+              for i in $(seq 1 90); do
+                if wget -q --spider http://{{ include "woocommerce.fullname" . }}-wordpress:80/ 2>/dev/null; then
+                  echo "WordPress is ready!"
+                  exit 0
+                fi
+                echo "Attempt $i/90: WordPress not ready yet, waiting 5s..."
+                sleep 5
+              done
+              echo "WordPress did not become ready in time"
+              exit 1
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+
+      containers:
+        - name: wp-init
+          image: curlimages/curl:8.12.1
+          
+          env:
+            - name: WP_HOST
+              value: {{ include "woocommerce.fullname" . }}-wordpress
+            - name: WP_ADMIN_USER
+              value: {{ .Values.wordpress.adminUser | quote }}
+            - name: WP_ADMIN_PASSWORD
+              value: {{ .Values.wordpress.adminPassword | quote }}
+            - name: WP_ADMIN_EMAIL
+              value: {{ .Values.wordpress.adminEmail | quote }}
+            - name: WP_SITE_URL
+              value: "http://{{ .Values.ingress.host }}"
+            - name: WP_SITE_TITLE
+              value: {{ .Values.wordpress.siteTitle | quote }}
+
+          command:
+            - sh
+            - -c
+            - |
+              set -e
+              echo "=== WooCommerce Store Initialization ==="
+              
+              # Step 1: Install WordPress via the install endpoint
+              echo "Step 1: Installing WordPress core..."
+              INSTALL_RESULT=$(curl -s -o /dev/null -w "%{http_code}" \
+                -X POST "http://$WP_HOST/wp-admin/install.php?step=2" \
+                -d "weblog_title=$(echo $WP_SITE_TITLE | sed 's/ /+/g')" \
+                -d "user_name=$WP_ADMIN_USER" \
+                -d "admin_password=$WP_ADMIN_PASSWORD" \
+                -d "admin_password2=$WP_ADMIN_PASSWORD" \
+                -d "pw_weak=1" \
+                -d "admin_email=$WP_ADMIN_EMAIL" \
+                -d "blog_public=0")
+              echo "WordPress install returned HTTP $INSTALL_RESULT"
+
+              # Step 2: Get auth cookies for API calls
+              echo "Step 2: Authenticating..."
+              COOKIE_JAR="/tmp/cookies.txt"
+              
+              # Wait a moment for WordPress to be fully installed
+              sleep 5
+              
+              # Login to get auth cookies
+              curl -s -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+                -X POST "http://$WP_HOST/wp-login.php" \
+                -d "log=$WP_ADMIN_USER" \
+                -d "pwd=$WP_ADMIN_PASSWORD" \
+                -d "wp-submit=Log+In" \
+                -d "redirect_to=/wp-admin/" \
+                -d "testcookie=1" \
+                -L -o /dev/null
+
+              # Get the nonce for plugin operations
+              echo "Step 3: Installing WooCommerce plugin..."
+              
+              # Download and activate WooCommerce via the plugin API
+              # First, try to install via the plugin install page
+              PLUGIN_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/plugin-install.php?s=woocommerce&tab=search&type=term")
+              
+              # Extract the install URL for WooCommerce
+              INSTALL_URL=$(echo "$PLUGIN_PAGE" | grep -o 'plugin-install.php?action=install-plugin[^"]*woocommerce[^"]*' | head -1)
+              
+              if [ -n "$INSTALL_URL" ]; then
+                echo "Installing WooCommerce plugin..."
+                curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+                  "http://$WP_HOST/wp-admin/$INSTALL_URL" -L -o /dev/null
+                sleep 5
+              else
+                echo "WooCommerce may already be installed"
+              fi
+              
+              # Activate WooCommerce
+              echo "Step 4: Activating WooCommerce..."
+              PLUGINS_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/plugins.php")
+              ACTIVATE_URL=$(echo "$PLUGINS_PAGE" | grep -o 'plugins.php?action=activate[^"]*woocommerce[^"]*' | head -1)
+              
+              if [ -n "$ACTIVATE_URL" ]; then
+                curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+                  "http://$WP_HOST/wp-admin/$ACTIVATE_URL" -L -o /dev/null
+                echo "WooCommerce activated!"
+              else
+                echo "WooCommerce may already be active"
+              fi
+              
+              sleep 3
+              
+              # Step 5: Configure WooCommerce basic settings via options
+              echo "Step 5: Configuring store settings..."
+              
+              # Get general settings page for nonce
+              GENERAL_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/admin.php?page=wc-settings")
+              WC_NONCE=$(echo "$GENERAL_PAGE" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+              
+              if [ -n "$WC_NONCE" ]; then
+                curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+                  -X POST "http://$WP_HOST/wp-admin/admin.php?page=wc-settings&tab=general" \
+                  -d "_wpnonce=$WC_NONCE" \
+                  -d "woocommerce_store_address=123+Test+Street" \
+                  -d "woocommerce_store_city=San+Francisco" \
+                  -d "woocommerce_default_country=US:CA" \
+                  -d "woocommerce_store_postcode=94102" \
+                  -d "woocommerce_currency=USD" \
+                  -d "save=Save+changes" \
+                  -o /dev/null
+                echo "Store settings configured!"
+              fi
+              
+              # Step 6: Enable Cash on Delivery
+              echo "Step 6: Enabling Cash on Delivery payment..."
+              COD_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/admin.php?page=wc-settings&tab=checkout&section=cod")
+              COD_NONCE=$(echo "$COD_PAGE" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+              
+              if [ -n "$COD_NONCE" ]; then
+                curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+                  -X POST "http://$WP_HOST/wp-admin/admin.php?page=wc-settings&tab=checkout&section=cod" \
+                  -d "_wpnonce=$COD_NONCE" \
+                  -d "woocommerce_cod_settings[enabled]=yes" \
+                  -d "woocommerce_cod_settings[title]=Cash+on+Delivery" \
+                  -d "woocommerce_cod_settings[description]=Pay+with+cash+upon+delivery." \
+                  -d "save=Save+changes" \
+                  -o /dev/null
+                echo "COD payment enabled!"
+              fi
+              
+              # Step 7: Create sample products via WP admin AJAX
+              echo "Step 7: Creating sample products..."
+
+              # Get a nonce for creating posts
+              POST_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/post-new.php?post_type=product")
+              POST_NONCE=$(echo "$POST_PAGE" | grep -o '"_wpnonce":"[^"]*"' | head -1 | cut -d'"' -f4)
+
+              # Create products using the REST API with cookie auth
+              WP_NONCE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/admin-ajax.php?action=rest-nonce" 2>/dev/null)
+              
+              if [ -n "$WP_NONCE" ] && [ "$WP_NONCE" != "0" ]; then
+                # Create 3 sample products
+                for i in 1 2 3; do
+                  case $i in
+                    1) NAME="Classic T-Shirt"; PRICE="29.99"; DESC="Premium cotton t-shirt";;
+                    2) NAME="Running Shoes"; PRICE="89.99"; DESC="Lightweight running shoes";;
+                    3) NAME="Laptop Backpack"; PRICE="49.99"; DESC="Water-resistant laptop backpack";;
+                  esac
+                  
+                  curl -s -b "$COOKIE_JAR" \
+                    -X POST "http://$WP_HOST/wp-json/wc/v3/products" \
+                    -H "X-WP-Nonce: $WP_NONCE" \
+                    -H "Content-Type: application/json" \
+                    -d "{\"name\":\"$NAME\",\"type\":\"simple\",\"regular_price\":\"$PRICE\",\"description\":\"$DESC\",\"short_description\":\"$DESC\",\"status\":\"publish\",\"manage_stock\":true,\"stock_quantity\":100}" \
+                    -o /dev/null
+                  echo "Created product: $NAME (\$$PRICE)"
+                done
+              else
+                echo "WARNING: Could not get REST API nonce, skipping product creation"
+              fi
+              
+              # Step 8: Create WooCommerce pages
+              echo "Step 8: Setting up WooCommerce pages..."
+              TOOLS_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/admin.php?page=wc-status&tab=tools")
+              TOOLS_NONCE=$(echo "$TOOLS_PAGE" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+              
+              if [ -n "$TOOLS_NONCE" ]; then
+                curl -s -b "$COOKIE_JAR" -c "$COOKIE_JAR" \
+                  -X POST "http://$WP_HOST/wp-admin/admin.php?page=wc-status&tab=tools" \
+                  -d "_wpnonce=$TOOLS_NONCE" \
+                  -d "action=install_pages" \
+                  -o /dev/null
+              fi
+              
+              # Step 9: Set permalink structure
+              echo "Step 9: Setting permalinks..."
+              PERMALINK_PAGE=$(curl -s -b "$COOKIE_JAR" "http://$WP_HOST/wp-admin/options-permalink.php")
+              PL_NONCE=$(echo "$PERMALINK_PAGE" | grep -o 'name="_wpnonce" value="[^"]*"' | head -1 | grep -o 'value="[^"]*"' | cut -d'"' -f2)
+              
+              if [ -n "$PL_NONCE" ]; then
+                curl -s -b "$COOKIE_JAR" \
+                  -X POST "http://$WP_HOST/wp-admin/options-permalink.php" \
+                  -d "_wpnonce=$PL_NONCE" \
+                  -d "selection=/%postname%/" \
+                  -d "permalink_structure=/%postname%/" \
+                  -d "submit=Save+Changes" \
+                  -o /dev/null
+              fi
+              
+              echo "=== WooCommerce Store Ready! ==="
+              echo "Store URL: $WP_SITE_URL"
+              echo "Admin URL: $WP_SITE_URL/wp-admin"
+              echo "Admin User: $WP_ADMIN_USER"
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 256Mi

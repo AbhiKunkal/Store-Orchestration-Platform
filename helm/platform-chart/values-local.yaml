@@ -1,0 +1,13 @@
+# ─── Local values override ────────────────────────────────────────
+# For kind cluster development
+
+domain: 127.0.0.1.nip.io
+
+api:
+  imagePullPolicy: IfNotPresent
+  env:
+    maxStores: "10"
+
+ingress:
+  className: nginx
+  tls: false

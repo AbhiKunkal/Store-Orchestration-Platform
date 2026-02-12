@@ -1,0 +1,90 @@
+# ─── WordPress Deployment ─────────────────────────────────────────
+#
+# WHY Deployment (not StatefulSet)?
+# WordPress is stateless — it reads data from MySQL.
+# The only state is wp-content (themes/plugins/uploads), which
+# we persist via a separate PVC mounted at /var/www/html/wp-content.
+# If the pod restarts, it reconnects to MySQL and serves again.
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "woocommerce.fullname" . }}-wordpress
+  labels:
+    {{- include "woocommerce.labels" . | nindent 4 }}
+    app.kubernetes.io/component: storefront
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "woocommerce.wordpress.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "woocommerce.wordpress.selectorLabels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: wordpress
+          image: {{ .Values.wordpress.image }}
+          ports:
+            - containerPort: 80
+              name: http
+              protocol: TCP
+          
+          env:
+            # ── Database connection ──
+            # WordPress connects to MySQL via the K8s Service name
+            - name: WORDPRESS_DB_HOST
+              value: {{ include "woocommerce.fullname" . }}-mysql
+            - name: WORDPRESS_DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-database
+            - name: WORDPRESS_DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-user
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "woocommerce.fullname" . }}-mysql
+                  key: mysql-password
+          
+          resources:
+            requests:
+              cpu: {{ .Values.wordpress.resources.requests.cpu }}
+              memory: {{ .Values.wordpress.resources.requests.memory }}
+            limits:
+              cpu: {{ .Values.wordpress.resources.limits.cpu }}
+              memory: {{ .Values.wordpress.resources.limits.memory }}
+          
+          # ── Liveness Probe ──
+          livenessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+            initialDelaySeconds: 60
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          # ── Readiness Probe ──
+          readinessProbe:
+            httpGet:
+              path: /wp-login.php
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html
+      
+      volumes:
+        - name: wordpress-data
+          persistentVolumeClaim:
+            claimName: {{ include "woocommerce.fullname" . }}-wordpress

@@ -1,0 +1,17 @@
+# ─── API PVC ──────────────────────────────────────────────────────
+# Persistent storage for SQLite database
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: store-api-data
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.api.storage.className }}
+  storageClassName: {{ .Values.api.storage.className }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.api.storage.size }}

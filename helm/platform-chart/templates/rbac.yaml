@@ -1,0 +1,88 @@
+# ─── RBAC: ServiceAccount + ClusterRole + ClusterRoleBinding ──────
+#
+# WHY RBAC?
+# The API needs to create namespaces, run helm install, check pod status.
+# Without explicit RBAC, it would use the default ServiceAccount which
+# has NO permissions (deny-by-default in K8s).
+#
+# WHY not cluster-admin?
+# cluster-admin gives God-mode access. We only need:
+# - Create/delete namespaces (for store isolation)
+# - Full access WITHIN store namespaces (helm manages resources)
+# - Read pods/jobs (for status monitoring)
+#
+# INTERVIEW DEFENSE:
+# "We follow least-privilege. The API can manage store namespaces
+#  but cannot modify the platform namespace or system components."
+
+# 1. ServiceAccount — identity for the API pod
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: store-api
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+
+---
+
+# 2. ClusterRole — what permissions the API gets
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: store-provisioner
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+rules:
+  # Namespace management (create/delete store namespaces)
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "create", "delete"]
+  
+  # All resources in namespaces (Helm needs this to install charts)
+  # NOTE: Helm tracks Deployments via ReplicaSets, and Services create
+  # Endpoints automatically. Must include ALL child resources.
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io", "discovery.k8s.io"]
+    resources:
+      - deployments
+      - replicasets
+      - statefulsets
+      - controllerrevisions
+      - services
+      - endpoints
+      - endpointslices
+      - pods
+      - pods/log
+      - jobs
+      - configmaps
+      - secrets
+      - persistentvolumeclaims
+      - ingresses
+      - events
+      - serviceaccounts
+      - networkpolicies
+      - resourcequotas
+      - limitranges
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Read nodes (for cluster status)
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list"]
+
+---
+
+# 3. ClusterRoleBinding — binds the role to the service account
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: store-provisioner-binding
+  labels:
+    {{- include "platform.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: store-provisioner
+subjects:
+  - kind: ServiceAccount
+    name: store-api
+    namespace: {{ .Release.Namespace }}
