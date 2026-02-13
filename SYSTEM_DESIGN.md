@@ -8,7 +8,7 @@
 - **Simplicity**: Single Express server handles API + orchestration
 - **Debuggability**: All logic in one place, standard Node.js debugging
 - **Explainability**: No hidden state machines or CRD reconciliation loops
-- **Interview-safe**: Can walk through entire flow in one codebase
+- **Single-process**: Can walk through entire flow in one codebase
 
 ### Reliability Model
 
@@ -166,8 +166,9 @@ All API errors follow a consistent schema:
 | `NOT_FOUND` | 404 | Store ID doesn't exist |
 | `INVALID_STATE_TRANSITION` | 409 | Retry on ready store, delete on deleted store |
 | `OPERATION_IN_PROGRESS` | 409 | Concurrent operation on same store |
+| `RATE_LIMIT_EXCEEDED` | 429 | Too many requests (general or create) |
 | `INVALID_JSON` | 400 | Malformed request body |
-| `INTERNAL_ERROR` | 500 | Unhandled exception |
+| `INTERNAL_SERVER_ERROR` | 500 | Unhandled exception |
 
 Success responses are unchanged — only errors are standardized.
 
@@ -290,5 +291,5 @@ helm upgrade platform ./helm/platform-chart \
 | WooCommerce over Medusa | Heavier containers | Mature ecosystem, official images, faster setup |
 | nip.io domains | Depends on external DNS | No host file editing, better DX |
 | Helm hooks for init | Job runs after install | Clean separation of deployment vs setup |
-| NetworkPolicy deny-all | More YAML complexity | Strong security posture, interview differentiator |
+| NetworkPolicy deny-all | More YAML complexity | Strong security posture, required for tenant isolation |
 | Structured API errors | Slight over-engineering for demo | Production-grade feel, clients can switch on `error.code` |

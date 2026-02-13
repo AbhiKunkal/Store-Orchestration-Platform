@@ -72,7 +72,7 @@ Provisioning is idempotent and crash-safe. Startup recovery reconciles platform 
 
 ```bash
 # Clone the repository
-git clone <repo-url> && cd store-platform
+git clone https://github.com/AbhiKunkal/Store-Orchestration-Platform.git && cd Store-Orchestration-Platform
 
 # Run the setup script
 # Linux/Mac:
@@ -121,6 +121,12 @@ curl http://api.127.0.0.1.nip.io/api/health
 
 # Open Dashboard
 # http://dashboard.127.0.0.1.nip.io
+
+### Run Tests
+```bash
+cd backend
+npm test
+```
 ```
 
 ---
@@ -273,7 +279,7 @@ All errors return a structured response:
 }
 ```
 
-Error codes: `MISSING_STORE_NAME`, `INVALID_ENGINE`, `QUOTA_EXCEEDED`, `NOT_FOUND`, `INVALID_STATE_TRANSITION`, `OPERATION_IN_PROGRESS`, `INVALID_JSON`, `INTERNAL_ERROR`.
+Error codes: `MISSING_STORE_NAME`, `INVALID_STORE_NAME`, `INVALID_ENGINE`, `ENGINE_UNAVAILABLE`, `QUOTA_EXCEEDED`, `RATE_LIMIT_EXCEEDED`, `NOT_FOUND`, `INVALID_STATE_TRANSITION`, `OPERATION_IN_PROGRESS`, `INVALID_JSON`, `INTERNAL_SERVER_ERROR`.
 
 ### Observability
 
@@ -306,6 +312,9 @@ store-platform/
 │   │   │       ├── woocommerce.js   # ✅ Fully implemented
 │   │   │       └── medusa.js        # 🔲 Stubbed
 │   │   ├── middleware/              # Rate limiter, error handler
+│   │   ├── __tests__/               # Unit & Integration tests
+│   │   │   ├── unit/                # error, db, utils tests
+│   │   │   └── integration/         # API endpoint tests
 │   │   └── utils/
 │   │       ├── helmClient.js        # Helm CLI wrapper
 │   │       ├── kubectlClient.js     # kubectl CLI wrapper
