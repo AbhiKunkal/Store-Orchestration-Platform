@@ -1,8 +1,7 @@
 # 🏪 Kubernetes Store Orchestration Platform
 
 A platform for provisioning and managing isolated WooCommerce stores on Kubernetes. Each store runs in its own namespace with dedicated WordPress, MySQL, and Ingress — fully automated via Helm.
-
-> **Built for**: Urumi AI SDE Internship — Round 1: System Design  
+  
 > **Engine**: WooCommerce (fully implemented), MedusaJS (stubbed, architecture supports it)  
 > **Key principle**: Same Helm charts, different values files. Zero code changes between local and production.
 
@@ -71,6 +70,7 @@ Provisioning is idempotent and crash-safe. Startup recovery reconciles platform 
 ### Option A: Automated Setup
 
 ```bash
+
 # Clone the repository
 git clone https://github.com/AbhiKunkal/Store-Orchestration-Platform.git && cd Store-Orchestration-Platform
 
@@ -122,15 +122,15 @@ curl http://api.127.0.0.1.nip.io/api/health
 # Open Dashboard
 # http://dashboard.127.0.0.1.nip.io
 
+
+```
+
 ### Run Tests
 ```bash
 cd backend
 npm test
-```
-```
 
----
-
+```
 ## 📦 How to Create a Store and Place an Order
 
 ### 1. Create a Store
@@ -158,6 +158,7 @@ npm test
 4. Verify: `kubectl get ns` — store namespace should be gone
 
 ---
+
 
 ## 🏗️ VPS / Production Setup (k3s)
 
@@ -367,3 +368,4 @@ kind delete cluster --name store-platform
 ## License
 
 This project is created as part of a hiring assessment and is owned by the author.
+
