@@ -1,23 +1,11 @@
-/**
- * Database layer using SQLite (via better-sqlite3).
- * 
- * WHY SQLite?
- * - Platform state is low-volume, single-writer (one API server)
- * - No need for a separate database container for the platform itself
- * - PVC-backed file gives us crash-safe persistence in Kubernetes
- * - In production, could swap to Postgres without changing API logic
- * 
- * TABLES:
- * - stores: tracks each provisioned store's lifecycle
- * - audit_log: immutable log of all actions (create, delete, status changes)
- */
+// Database layer — SQLite via better-sqlite3.
+// Tables: stores (lifecycle tracking), audit_log (immutable action log).
 
 const Database = require('better-sqlite3');
 const path = require('path');
 const fs = require('fs');
 const config = require('./config');
 
-// Ensure the data directory exists
 const dbDir = path.dirname(config.dbPath);
 if (!dbDir.startsWith('.') || dbDir !== '.') {
   fs.mkdirSync(dbDir, { recursive: true });
@@ -25,13 +13,10 @@ if (!dbDir.startsWith('.') || dbDir !== '.') {
 
 const db = new Database(config.dbPath);
 
-// Enable WAL mode for better concurrent read performance
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
-// ─── Schema Migration ─────────────────────────────────────────────
-// We run migrations on startup. For a small project, this is fine.
-// In production, use a proper migration tool (knex, prisma, etc.)
+// ─── Schema ──────────────────────────────────────────────────────
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS stores (
@@ -61,20 +46,17 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_log(created_at);
 `);
 
-// ─── Prepared Statements ──────────────────────────────────────────
-// Prepared statements are compiled once and reused → faster + safer
+// ─── Prepared Statements ─────────────────────────────────────────
 
 const stmts = {
-  // Store operations
   insertStore: db.prepare(`
     INSERT INTO stores (id, name, engine, status, namespace, helm_release)
     VALUES (@id, @name, @engine, @status, @namespace, @helmRelease)
   `),
 
   getStore: db.prepare('SELECT * FROM stores WHERE id = ?'),
-  
   getAllStores: db.prepare('SELECT * FROM stores ORDER BY created_at DESC'),
-  
+
   getActiveStoreCount: db.prepare(
     "SELECT COUNT(*) as count FROM stores WHERE status NOT IN ('deleted', 'failed')"
   ),
@@ -98,7 +80,6 @@ const stmts = {
     WHERE id = @id
   `),
 
-  // Audit log
   insertAudit: db.prepare(`
     INSERT INTO audit_log (store_id, action, details)
     VALUES (@storeId, @action, @details)
@@ -112,7 +93,6 @@ const stmts = {
     'SELECT * FROM audit_log WHERE store_id = ? ORDER BY created_at DESC'
   ),
 
-  // Metrics
   getStoreCounts: db.prepare(`
     SELECT status, COUNT(*) as count FROM stores GROUP BY status
   `),
@@ -133,17 +113,12 @@ const stmts = {
   `),
 };
 
-// ─── Database API ─────────────────────────────────────────────────
+// ─── Store Operations ────────────────────────────────────────────
 
 const store = {
   create({ id, name, engine, namespace, helmRelease }) {
     stmts.insertStore.run({
-      id,
-      name,
-      engine,
-      status: 'queued',
-      namespace,
-      helmRelease,
+      id, name, engine, status: 'queued', namespace, helmRelease,
     });
     audit.log(id, 'create', { name, engine });
     return stmts.getStore.get(id);
@@ -177,6 +152,8 @@ const store = {
   },
 };
 
+// ─── Audit Log ───────────────────────────────────────────────────
+
 const audit = {
   log(storeId, action, details = {}) {
     stmts.insertAudit.run({
@@ -195,13 +172,14 @@ const audit = {
   },
 };
 
+// ─── Metrics ─────────────────────────────────────────────────────
+
 const metrics = {
   getAll() {
     const counts = stmts.getStoreCounts.all();
     const provisioning = stmts.getProvisioningStats.get();
     const recentFailures = stmts.getRecentFailures.all();
 
-    // Convert counts array to object
     const statusCounts = {};
     counts.forEach(row => { statusCounts[row.status] = row.count; });
 

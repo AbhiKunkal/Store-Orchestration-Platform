@@ -1,18 +1,11 @@
-/**
- * Kubectl Client (Wrapper)
- * 
- * Used for operations that Helm doesn't handle well or for status checks.
- * - Namespace management (ensuring complete cleanup)
- * - Pod status polling (readiness checks)
- * - Log retrieval (future use)
- */
+// Kubectl CLI wrapper — namespace management, pod status polling, event retrieval.
 
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const config = require('../config');
 
 const execFileAsync = promisify(execFile);
-const KUBECTL_TIMEOUT = 30000; // 30s timeout for status checks
+const KUBECTL_TIMEOUT = 30000;
 
 async function kubectlExec(args) {
   try {
@@ -25,7 +18,6 @@ async function kubectlExec(args) {
     return stdout.trim();
   } catch (error) {
     const msg = error.stderr || error.message;
-    // Don't log here, let caller handle errors (e.g. "Previous install failed")
     throw new Error(`kubectl failed: ${msg}`);
   }
 }
@@ -45,15 +37,10 @@ async function deleteNamespace(namespace) {
     console.log(`[kubectl] Namespace ${namespace} doesn't exist, skipping delete`);
     return;
   }
-
-  // Cascading delete - removes all resources in the namespace
   await kubectlExec(['delete', 'namespace', namespace, '--wait=true']);
 }
 
-/**
- * Get detailed pod status for debugging
- * Returns: [{ name, phase, ready, restarts }]
- */
+/** Returns [{ name, phase, ready, restarts }] for all pods in namespace. */
 async function getPodStatuses(namespace) {
   try {
     const output = await kubectlExec([
@@ -61,7 +48,7 @@ async function getPodStatuses(namespace) {
       '--namespace', namespace,
       '-o', 'json',
     ]);
-    
+
     const data = JSON.parse(output);
     return data.items.map(pod => {
       const conditions = pod.status.conditions || [];
@@ -81,24 +68,17 @@ async function getPodStatuses(namespace) {
   }
 }
 
-/**
- * Check if ALL pods in a namespace are active and ready.
- * Used by the provisioner to know when a store is "Ready".
- */
+/** Check if all long-running pods in a namespace are ready (excludes completed jobs). */
 async function allPodsReady(namespace) {
   const pods = await getPodStatuses(namespace);
   if (pods.length === 0) return false;
 
-  // Filter out Completed jobs (like valid init jobs)
-  // We want to check if long-running pods (like wordpress, mysql) are Ready
   const runningPods = pods.filter(p => p.phase !== 'Succeeded');
-
-  if (runningPods.length === 0) return false; // Should be at least one running pod
+  if (runningPods.length === 0) return false;
 
   return runningPods.every(p => p.ready);
 }
 
-// Check if a specific job has completed successfully
 async function jobCompleted(namespace, jobName) {
   try {
     const output = await kubectlExec([
@@ -112,7 +92,6 @@ async function jobCompleted(namespace, jobName) {
   }
 }
 
-// Check if a job failed (backoff limit reached)
 async function jobFailed(namespace, jobName) {
   try {
     const output = await kubectlExec([
@@ -126,20 +105,18 @@ async function jobFailed(namespace, jobName) {
   }
 }
 
-/**
- * Get recent events for a namespace (useful for error messages)
- */
+/** Get recent cluster events — useful for surfacing failure reasons. */
 async function getEvents(namespace, limit = 10) {
   try {
     const output = await kubectlExec([
-      'get', 'events', 
+      'get', 'events',
       '--namespace', namespace,
       '--sort-by=.metadata.creationTimestamp',
       '-o', 'json'
     ]);
     const data = JSON.parse(output);
     const items = data.items || [];
-    
+
     return items.slice(-limit).map(e => ({
       type: e.type,
       reason: e.reason,

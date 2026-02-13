@@ -1,32 +1,9 @@
-/**
- * Store API Routes
- * 
- * RESTful API for store lifecycle management.
- * 
- * ENDPOINTS:
- *   GET    /api/health       - Health check
- *   GET    /api/stores       - List all stores
- *   GET    /api/stores/:id   - Get single store details
- *   POST   /api/stores       - Create a new store
- *   DELETE /api/stores/:id   - Delete a store
- *   POST   /api/stores/:id/retry - Retry a failed provisioning
- *   GET    /api/audit        - Get audit log
- *   GET    /api/metrics      - Platform metrics
- * 
- * ERROR SCHEMA:
- *   All errors follow: { error: { code: "ERROR_CODE", message: "..." } }
- *   Success responses are NOT changed — only errors are standardized.
- * 
- * LIFECYCLE STATE MACHINE:
- *   queued → provisioning → ready
- *                        → failed → (retry) → provisioning
- *   any (except deleted) → deleting → deleted
- * 
- * DESIGN NOTES:
- * - Create is async: returns 201 immediately, provisioning runs in background
- * - Delete is async: returns 202, cleanup runs in background
- * - Status polling is how the dashboard tracks progress
- */
+// Store API routes — CRUD + retry + audit + metrics.
+//
+// Lifecycle state machine:
+//   queued → provisioning → ready
+//                        → failed → (retry) → provisioning
+//   any (except deleted) → deleting → deleted
 
 const { Router } = require('express');
 const { v4: uuidv4 } = require('uuid');
@@ -37,13 +14,35 @@ const { Errors } = require('../utils/apiError');
 
 const router = Router();
 
-// ─── Valid state transitions (Lifecycle State Machine) ─────────
-// Used as a guard to prevent invalid operations on stores.
 const RETRYABLE_STATES = ['failed'];
 const DELETABLE_STATES = ['ready', 'failed', 'queued', 'provisioning'];
 const TERMINAL_STATES = ['deleted'];
 
-// ─── GET /api/health ──────────────────────────────────────────────
+// ─── Validation ──────────────────────────────────────────────────
+
+function validateCreateStore(body) {
+  const { name, engine = 'woocommerce' } = body || {};
+
+  if (!name || typeof name !== 'string' || name.trim().length === 0) {
+    throw Errors.badRequest('Store name is required and must be a non-empty string', 'MISSING_STORE_NAME');
+  }
+
+  if (name.trim().length < 2) {
+    throw Errors.badRequest('Store name must be at least 2 characters', 'INVALID_STORE_NAME');
+  }
+
+  if (!['woocommerce', 'medusa'].includes(engine)) {
+    throw Errors.badRequest(
+      `Invalid engine: '${engine}'. Must be 'woocommerce' or 'medusa'`,
+      'INVALID_ENGINE'
+    );
+  }
+
+  return { name: name.trim().slice(0, 100), engine };
+}
+
+// ─── Routes ──────────────────────────────────────────────────────
+
 router.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
@@ -52,9 +51,6 @@ router.get('/health', (req, res) => {
   });
 });
 
-// ─── GET /api/stores ──────────────────────────────────────────────
-// Returns all stores sorted by creation date (newest first).
-// Dashboard polls this every 5 seconds to update UI.
 router.get('/stores', (req, res, next) => {
   try {
     const stores = store.getAll();
@@ -64,7 +60,6 @@ router.get('/stores', (req, res, next) => {
   }
 });
 
-// ─── GET /api/stores/:id ─────────────────────────────────────────
 router.get('/stores/:id', (req, res, next) => {
   try {
     const record = store.getById(req.params.id);
@@ -77,64 +72,34 @@ router.get('/stores/:id', (req, res, next) => {
   }
 });
 
-// ─── POST /api/stores ─────────────────────────────────────────────
-// Creates a new store and starts provisioning in the background.
-// Returns 201 immediately with the store record (status: "queued").
+// Create is async: returns 201 immediately, provisioning runs in background.
 router.post('/stores', (req, res, next) => {
   try {
-    const { name, engine = 'woocommerce' } = req.body || {};
+    const { name, engine } = validateCreateStore(req.body);
 
-    // ── Input validation ──
-    if (!name || typeof name !== 'string' || name.trim().length === 0) {
-      throw Errors.badRequest('Store name is required and must be a non-empty string', 'MISSING_STORE_NAME');
-    }
-
-    if (name.trim().length < 2) {
-      throw Errors.badRequest('Store name must be at least 2 characters', 'INVALID_STORE_NAME');
-    }
-
-    if (!['woocommerce', 'medusa'].includes(engine)) {
-      throw Errors.badRequest(
-        `Invalid engine: '${engine}'. Must be 'woocommerce' or 'medusa'`,
-        'INVALID_ENGINE'
-      );
-    }
-
-    // ── Engine validation (Strategy Pattern) ──
-    // Each engine module implements validate() — checks chart existence, etc.
+    // Engine availability check
     const engineModule = provisioner.getEngine(engine);
     const validation = engineModule.validate();
     if (!validation.valid) {
       throw Errors.badRequest(validation.error, 'ENGINE_UNAVAILABLE');
     }
 
-    // ── Quota check (abuse prevention) ──
+    // Quota check
     const activeCount = store.getActiveCount();
     if (activeCount >= config.maxStores) {
-      throw Errors.quotaExceeded(
-        `Maximum number of stores (${config.maxStores}) reached. Delete existing stores first.`
-      );
+      throw Errors.quotaExceeded(config.maxStores);
     }
 
-    // ── Generate IDs ──
     const shortId = uuidv4().split('-')[0];
     const storeId = `store-${shortId}`;
     const namespace = storeId;
     const helmRelease = storeId;
 
-    const sanitizedName = name.trim().slice(0, 100);
-
-    // ── Create database record ──
     const record = store.create({
-      id: storeId,
-      name: sanitizedName,
-      engine,
-      namespace,
-      helmRelease,
+      id: storeId, name, engine, namespace, helmRelease,
     });
 
-    // ── Start async provisioning ──
-    // Fire-and-forget. Dashboard polls for status updates.
+    // Fire-and-forget — dashboard polls for status updates
     setImmediate(() => {
       provisioner.provisionStore(storeId).catch(err => {
         console.error(`[api] Background provisioning error for ${storeId}:`, err);
@@ -149,9 +114,7 @@ router.post('/stores', (req, res, next) => {
   }
 });
 
-// ─── DELETE /api/stores/:id ──────────────────────────────────────
-// Starts async deletion of a store and all its resources.
-// Returns 202 immediately (deletion runs in background).
+// Delete is async: returns 202, cleanup runs in background.
 router.delete('/stores/:id', (req, res, next) => {
   try {
     const record = store.getById(req.params.id);
@@ -159,7 +122,6 @@ router.delete('/stores/:id', (req, res, next) => {
       throw Errors.notFound('Store', req.params.id);
     }
 
-    // ── Lifecycle state guard ──
     if (TERMINAL_STATES.includes(record.status)) {
       throw Errors.invalidState(record.status, 'delete');
     }
@@ -172,7 +134,6 @@ router.delete('/stores/:id', (req, res, next) => {
       throw Errors.invalidState(record.status, 'delete');
     }
 
-    // Start async deletion
     setImmediate(() => {
       provisioner.deleteStore(req.params.id).catch(err => {
         console.error(`[api] Background deletion error for ${req.params.id}:`, err);
@@ -187,9 +148,7 @@ router.delete('/stores/:id', (req, res, next) => {
   }
 });
 
-// ─── POST /api/stores/:id/retry ──────────────────────────────────
-// Retries provisioning for a failed store.
-// Lifecycle guard: only 'failed' stores can be retried.
+// Only failed stores can be retried.
 router.post('/stores/:id/retry', (req, res, next) => {
   try {
     const record = store.getById(req.params.id);
@@ -197,12 +156,10 @@ router.post('/stores/:id/retry', (req, res, next) => {
       throw Errors.notFound('Store', req.params.id);
     }
 
-    // ── Lifecycle state guard ──
     if (!RETRYABLE_STATES.includes(record.status)) {
       throw Errors.invalidState(record.status, 'retry');
     }
 
-    // Check for concurrent operations
     const opStatus = provisioner.getOperationStatus(req.params.id);
     if (opStatus) {
       throw Errors.operationInProgress(req.params.id);
@@ -210,7 +167,6 @@ router.post('/stores/:id/retry', (req, res, next) => {
 
     audit.log(record.id, 'retry', { previousError: record.error_message });
 
-    // Start async provisioning again
     setImmediate(() => {
       provisioner.provisionStore(req.params.id).catch(err => {
         console.error(`[api] Background retry error for ${req.params.id}:`, err);
@@ -225,9 +181,6 @@ router.post('/stores/:id/retry', (req, res, next) => {
   }
 });
 
-// ─── GET /api/audit ──────────────────────────────────────────────
-// Returns the audit log (most recent first).
-// Provides observability into platform actions.
 router.get('/audit', (req, res, next) => {
   try {
     const limit = Math.min(
@@ -241,9 +194,6 @@ router.get('/audit', (req, res, next) => {
   }
 });
 
-// ─── GET /api/metrics ────────────────────────────────────────────
-// Returns platform metrics for observability.
-// Surfaces: store counts, provisioning duration, recent failures.
 router.get('/metrics', (req, res, next) => {
   try {
     const data = metrics.getAll();

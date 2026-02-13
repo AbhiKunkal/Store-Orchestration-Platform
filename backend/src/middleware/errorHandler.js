@@ -1,17 +1,12 @@
-/**
- * Centralized Error Handler Middleware
- * 
- * Intercepts all errors, formats them into a standard JSON structure,
- * and hides implementation details in production.
- */
+// Centralized error handler — formats all errors into { error: { code, message } }.
 
 const { ApiError } = require('../utils/apiError');
+const config = require('../config');
 
 function errorHandler(err, req, res, next) {
-  // Log the error for debugging
   console.error(`[error] ${req.method} ${req.path}:`, err.stack || err.message);
 
-  // Handle SyntaxError (JSON parsing failed)
+  // Malformed JSON body
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
     return res.status(400).json({
       error: {
@@ -21,15 +16,14 @@ function errorHandler(err, req, res, next) {
     });
   }
 
-  // Handle known API errors
+  // Known operational errors
   if (err instanceof ApiError) {
     return res.status(err.statusCode).json(err.toJSON());
   }
 
-  // Handle unhandled errors (500)
-  // In production, we don't leak stack traces
-  const isProduction = process.env.NODE_ENV === 'production';
-  
+  // Unhandled errors — hide internals in production
+  const isProduction = config.nodeEnv === 'production';
+
   res.status(500).json({
     error: {
       code: 'INTERNAL_SERVER_ERROR',

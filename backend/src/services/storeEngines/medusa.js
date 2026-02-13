@@ -1,15 +1,5 @@
-/**
- * MedusaJS Store Engine (STUB)
- * 
- * Placeholder for future MedusaJS support.
- * Demonstrates how the Strategy pattern allows adding new engines 
- * without modifying the core provisioner logic.
- * 
- * INTERVIEW NOTE:
- * This exists to show I thought about extensibility.
- * Adding a new e-commerce engine (Magneto, Shopify-compatible, etc.) 
- * would just mean adding a new file here and a new Helm chart.
- */
+// MedusaJS store engine — stub for future implementation.
+// Adding a new engine requires: this file + a new Helm chart.
 
 const ENGINE_NAME = 'medusa';
 
@@ -29,9 +19,9 @@ function getUrls(storeId) {
 }
 
 function validate() {
-  return { 
-    valid: false, 
-    error: 'MedusaJS engine is not yet implemented. Please use WooCommerce.' 
+  return {
+    valid: false,
+    error: 'MedusaJS engine is not yet implemented. Please use WooCommerce.',
   };
 }
 

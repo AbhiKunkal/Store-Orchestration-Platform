@@ -1,32 +1,20 @@
-/**
- * Helm Client (Wrapper)
- * 
- * Interacts with the Helm CLI to install/uninstall charts.
- * 
- * WHY shell out to CLI?
- * - Node.js Helm libraries are often unmaintained or incomplete
- * - The CLI is the reference implementation
- * - Easy to debug (just run the same command in terminal)
- * - Same approach used by sophisticated tools like ArgoCD (execs helm/git)
- */
+// Helm CLI wrapper — shells out to helm binary for install/uninstall/status.
+// Same approach used by ArgoCD — CLI is the reference implementation.
 
 const { execFile } = require('child_process');
 const { promisify } = require('util');
 const config = require('../config');
 
 const execFileAsync = promisify(execFile);
-
-// Helm operations can be slow (pulling images, waiting for resources)
 const HELM_TIMEOUT = 600000; // 10 minutes
 
 async function helmExec(args) {
   try {
     const opts = {
       timeout: HELM_TIMEOUT,
-      maxBuffer: 1024 * 1024, // 1MB buffer for large outputs
+      maxBuffer: 1024 * 1024,
     };
 
-    // Inject KUBECONFIG if set (for local dev vs in-cluster)
     if (config.kubeconfig) {
       opts.env = { ...process.env, KUBECONFIG: config.kubeconfig };
     }
@@ -34,7 +22,6 @@ async function helmExec(args) {
     const { stdout, stderr } = await execFileAsync('helm', args, opts);
 
     if (stderr) {
-      // Helm sometimes prints warnings to stderr which aren't fatal
       console.warn(`[helm warn] ${args.join(' ')}: ${stderr}`);
     }
 
@@ -47,21 +34,14 @@ async function helmExec(args) {
 }
 
 /**
- * Install or Upgrade a Release
- * 
- * Idempotent: safe to run multiple times.
- * - --create-namespace: ensures target namespace exists
- * - --atomic: if it fails, it rolls back (removed here to allow debugging, see note)
- * 
- * NOTE: We do NOT use --wait or --atomic here because the Init Job can take
- * 3-10 minutes. We don't want to block the API thread for that long.
- * We rely on the Provisioner service to poll for readiness.
+ * Install a release. Idempotent — skips if already installed.
+ * Does NOT use --wait or --atomic: init jobs can take 3-10 minutes,
+ * and we rely on the provisioner to poll for readiness instead.
  */
 async function install({ releaseName, chartPath, namespace, values = {} }) {
-  // Check if already installed
   const exists = await releaseExists(releaseName, namespace);
   if (exists) {
-    console.log(`[helm] Release ${releaseName} already exists in ${namespace}, skipping install`);
+    console.log(`[helm] Release ${releaseName} already exists in ${namespace}, skipping`);
     return { alreadyExists: true };
   }
 
@@ -71,7 +51,6 @@ async function install({ releaseName, chartPath, namespace, values = {} }) {
     '--create-namespace',
   ];
 
-  // Flatten values object into --set arguments
   for (const [key, value] of Object.entries(values)) {
     args.push('--set', `${key}=${value}`);
   }
@@ -80,11 +59,7 @@ async function install({ releaseName, chartPath, namespace, values = {} }) {
   return { installed: true, output };
 }
 
-/**
- * Uninstall a Release
- * 
- * Idempotent: checks existence first.
- */
+/** Uninstall a release. Idempotent — no-op if not found. */
 async function uninstall({ releaseName, namespace }) {
   const exists = await releaseExists(releaseName, namespace);
   if (!exists) {
@@ -95,14 +70,14 @@ async function uninstall({ releaseName, namespace }) {
   const output = await helmExec([
     'uninstall', releaseName,
     '--namespace', namespace,
-    '--wait', // Wait for deletion to finish
+    '--wait',
   ]);
   return { uninstalled: true, output };
 }
 
 async function releaseExists(releaseName, namespace) {
   try {
-    const output = await helmExec([
+    await helmExec([
       'status', releaseName,
       '--namespace', namespace,
       '--output', 'json',
