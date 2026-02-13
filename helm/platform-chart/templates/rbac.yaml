@@ -1,19 +1,5 @@
-# ─── RBAC: ServiceAccount + ClusterRole + ClusterRoleBinding ──────
-#
-# WHY RBAC?
-# The API needs to create namespaces, run helm install, check pod status.
-# Without explicit RBAC, it would use the default ServiceAccount which
-# has NO permissions (deny-by-default in K8s).
-#
-# WHY not cluster-admin?
-# cluster-admin gives God-mode access. We only need:
-# - Create/delete namespaces (for store isolation)
-# - Full access WITHIN store namespaces (helm manages resources)
-# - Read pods/jobs (for status monitoring)
-#
-# INTERVIEW DEFENSE:
-# "We follow least-privilege. The API can manage store namespaces
-#  but cannot modify the platform namespace or system components."
+# RBAC: ServiceAccount + ClusterRole + ClusterRoleBinding
+# Least-privilege: API can manage store namespaces but cannot modify system components.
 
 # 1. ServiceAccount — identity for the API pod
 apiVersion: v1

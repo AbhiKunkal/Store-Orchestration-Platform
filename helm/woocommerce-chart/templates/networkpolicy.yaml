@@ -1,15 +1,6 @@
-# ─── Network Policy ───────────────────────────────────────────────
-#
-# DENY-BY-DEFAULT with explicit allows.
-#
-# WHY NetworkPolicy?
-# - Without it, any pod can talk to any other pod in the cluster
-# - Store A's MySQL should NOT be accessible from Store B
-# - Only WordPress needs to talk to MySQL
-# - Only Ingress controller needs to talk to WordPress
-#
-# This is a STRONG differentiator in interviews.
-# Most candidates never mention network isolation.
+# NetworkPolicy — deny-by-default with explicit allows.
+# MySQL: only accepts connections from WordPress in same namespace.
+# WordPress: only accepts traffic from Ingress controller.
 
 {{- if .Values.networkPolicy.enabled }}
 

@@ -1,12 +1,6 @@
-# ─── WooCommerce Store Chart: Default Values ───────────────────────
-#
-# These are sensible defaults for local development.
+# WooCommerce Store Chart — default values for local development.
 # Production overrides go in values-prod.yaml.
 # Per-store overrides are passed via --set at install time.
-#
-# INTERVIEW NOTE:
-# "Every configurable value has a default. Local vs prod differences
-#  are handled ONLY through values files — zero code changes."
 
 # Store identity
 store:

@@ -1,15 +1,5 @@
-# ─── ResourceQuota ────────────────────────────────────────────────
-#
-# Limits the total resources a single store can consume.
-#
-# WHY?
-# - Prevents a single store from starving the cluster
-# - Important for multi-tenant isolation
-# - Blast radius control: one bad store can't affect others
-#
-# INTERVIEW DEFENSE:
-# "Each store has a ResourceQuota in its namespace. Even if a store
-#  is compromised, it can't consume more than its allocated share."
+# ResourceQuota — limits total resources a single store namespace can consume.
+# Blast radius control: one store cannot starve others.
 
 {{- if .Values.resourceQuota.enabled }}
 apiVersion: v1

@@ -1,15 +1,5 @@
-# ─── HorizontalPodAutoscaler ─────────────────────────────────────
-#
-# Scales API and Dashboard pods based on CPU utilization.
-#
-# WHY?
-# - Dashboard = stateless nginx → scales freely
-# - API = mostly stateless → scales with PostgreSQL (prod) or behind load balancer
-# - Demonstrates "implemented, not just described" scaling
-#
-# INTERVIEW DEFENSE:
-# "HPA is conditional — disabled locally (single-node kind),
-#  enabled in production via values-prod.yaml."
+# HorizontalPodAutoscaler — scales API and Dashboard pods on CPU utilization.
+# Conditional: disabled locally (single-node kind), enabled via values-prod.yaml.
 
 {{- if .Values.autoscaling.enabled }}
 ---
